@@ -2,6 +2,7 @@
 #include <modbus/modbus.h>
 #include <errno.h>
 #include <unistd.h>
+#include <sys/time.h>
 
 // modbus functions documentation
 // http://libmodbus.org/docs/v3.1.4/
@@ -36,11 +37,10 @@ public:
 		throw FatalError();		
 	  }
 
-	if (modbus_set_response_timeout(this->ctx, REQUEST_TIMEOUT_SEC, 0) == -1)
-	  {
-		std::cerr << "Setting request timeout failed\n";
-		throw FatalError();
-	  }
+
+	struct timeval timeoutValue = { REQUEST_TIMEOUT_SEC, 0 };
+	
+	modbus_set_response_timeout(this->ctx, &timeoutValue);
   }
 
   ~Master()
