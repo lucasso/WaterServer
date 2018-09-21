@@ -4,6 +4,8 @@
 #include <unistd.h>
 #include <sys/time.h>
 
+#include <boost/static_assert.hpp>
+
 #define _WATER_SERVER
 #include "waterSharedTypes.h"
 #undef _WATER_SERVER
@@ -73,29 +75,47 @@ void Master::setSlave(int const slaveId)
 
 int Master::readData()
 {
-  uint16_t tab_reg[1];
-  int rc;
+	uint16_t tab_reg[SEND_BUFFER_SIZE_BYTES/2];
+	int rc;
 
   while (1)
 	{
-	  rc = modbus_read_registers(this->ctx, 0x7000, 1, tab_reg);
+	  rc = modbus_read_registers(this->ctx, REQUEST_ADDRESS, SEND_BUFFER_SIZE_BYTES/2, tab_reg);
 	  if (rc == -1)
 		{
 		  std::cerr << "reading register failed " << modbus_strerror(errno) << "\n";
-		  sleep(1);
+		  //sleep(1);
 		}
 	  else break;
 	}
 
-  for (int i=0; i < rc; i++) {
-	std::cout << "reg[" << i << "] = " << tab_reg[i] << "\n";
+  water::WaterClient::Request* rq = reinterpret_cast<water::WaterClient::Request*>(tab_reg);
+  std::cout << "requestSeqNumAtBegin:" << +rq->requestSeqNumAtBegin << ", requestType:" << static_cast<uint32_t>(rq->requestType);
+  switch (rq->requestType)
+  {
+  case water::RequestType::LOGIN_BY_USER:
+	  std::cout << ", userId:" << rq->impl.loginByUser.userId << ", pin:" << rq->impl.loginByUser.userId;
+	  break;
+
+  case water::RequestType::LOGIN_BY_RFID:
+	  std::cout << ", rfid:" << rq->impl.loginByRfid.rfidId ;
+	  break;
+  default:
+	  std::cout << "unknown type";
   }
+
+  std::cout << ", consumeCredit:" << rq->consumeCredit << ", requestSeqNumAtEnd:" << +rq->requestSeqNumAtEnd  << "\n";
+
+  //for (int i=0; i < rc; i++) {
+	//std::cout << "reg[" << i << "] = " << tab_reg[i] << "\n";
+  //}
 
   return tab_reg[0];
 }
 
 void Master::writeData(int value)
 {
+
   while (1)
 	{
 	  if (modbus_write_register(this->ctx, 0x7000, value) != 1)
@@ -114,10 +134,16 @@ void Master::writeData(int value)
 
 int main()
 {
+	BOOST_STATIC_ASSERT((sizeof(water::WaterClient::Request) + sizeof(uint16_t) - 1) / sizeof(uint16_t) == SEND_BUFFER_SIZE_BYTES/2);
+
+
   Master m;
   m.setSlave(101);
-  int val = m.readData();
-  m.writeData(val+1);
-  m.readData();
+  while(1)
+  {
+	  m.readData();
+  }
+  //m.writeData(val+1);
+  //m.readData();
   return 0;
 }
