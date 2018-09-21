@@ -4,10 +4,14 @@
 #include <unistd.h>
 #include <sys/time.h>
 
-// modbus functions documentation
-// http://libmodbus.org/docs/v3.1.4/
+#define _WATER_SERVER
+#include "waterSharedTypes.h"
+#undef _WATER_SERVER
 
-#define DEVICE "/dev/ttyUSB0"
+// modbus functions documentation
+// http://libmodbus.org/docs/v3.0.6/
+
+#define DEVICE "/dev/water"
 #define BAUD 9600
 #define PARITY 'N'
 #define DATA_BITS 8

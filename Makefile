@@ -1,7 +1,7 @@
 all: clean waterServer
 
 waterServer.o:
-	g++ -Wall waterServer.cpp -c -o waterServer.o
+	g++ -std=c++11 -I../WaterClient -Wall waterServer.cpp -c -o waterServer.o
 
 waterServer: waterServer.o
 	g++ -lmodbus waterServer.o -o waterServer
