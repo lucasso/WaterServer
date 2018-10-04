@@ -1,10 +1,17 @@
 all: clean waterServer
 
 waterServer.o:
-	g++ -std=c++11 -I../WaterClient -Wall waterServer.cpp -c -o waterServer.o
+	g++ -std=c++1y -I../WaterClient -Wall -Werror waterServer.cpp -c -o waterServer.o
 
-waterServer: waterServer.o
-	g++ -lmodbus waterServer.o -o waterServer
+guiProxy.o:
+	g++ -std=c++1y -I../WaterClient `curl-config --cflags` -Wall -Werror guiProxy.cpp -c -o guiProxy.o
+
+clientProxy.o:
+	g++ -std=c++1y -I../WaterClient -Wall -Werror clientProxy.cpp -c -o clientProxy.o
+
+
+waterServer: waterServer.o guiProxy.o clientProxy.o
+	g++ `curl-config --libs` -llog4cxx -lmodbus -lboost_system -lboost_thread waterServer.o guiProxy.o clientProxy.o -o waterServer
 
 clean:
-	rm -f waterServer.o waterServer
+	rm -f *.o waterServer

@@ -33,3 +33,6 @@
 
 # backup files
 *~
+
+waterServer.log*
+.settings/*
