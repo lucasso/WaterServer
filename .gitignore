@@ -37,3 +37,6 @@
 waterServer.log*
 .settings/*
 waterServer
+Debug/*
+.cproject
+.project

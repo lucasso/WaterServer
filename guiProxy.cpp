@@ -30,7 +30,6 @@ private:
 
 	void workerMain();
 
-	CURL *curl;
 	std::string const urlPrefix;
 	boost::scoped_thread<> worker;
 	
@@ -74,11 +73,9 @@ void GuiProxyImpl::handleRfidRequest(WaterClient::RfidId rfidId, WaterClient::Cr
 }
 
 GuiProxyImpl::GuiProxyImpl() :
-	curl(curl_easy_init()),
 	urlPrefix("http://localhost:3000/"),
 	worker{boost::thread(&GuiProxyImpl::workerMain, this)}
 {
-	BOOST_ASSERT_MSG(curl, "curl initialization failed");
 }
 
 
@@ -86,7 +83,6 @@ GuiProxyImpl::~GuiProxyImpl()
 {
 	this->worker.interrupt();
 	this->worker.join();
-	curl_easy_cleanup(this->curl);
 }
 
 
@@ -94,18 +90,22 @@ void
 GuiProxyImpl::workerMain()
 {
 	while (1) {
+		{
+			std::unique_ptr<CURL, void(*)(CURL*)> curl(curl_easy_init(), curl_easy_cleanup);
+			BOOST_ASSERT_MSG(curl.get() != nullptr, "curl initialization failed");
 		
-		curl_easy_setopt(curl, CURLOPT_URL, "http://localhost:3000/getuser_rfid");	
-		curl_easy_setopt(curl, CURLOPT_POSTFIELDS, "client_rfid=96337");
+			curl_easy_setopt(curl.get(), CURLOPT_URL, "http://localhost:3000/getuser_rfid");
+			curl_easy_setopt(curl.get(), CURLOPT_POSTFIELDS, "client_rfid=96337");
  
 
-		CURLcode res = curl_easy_perform(curl);
+			CURLcode res = curl_easy_perform(curl.get());
 	
-		if (res != CURLE_OK) {
-			LOG("curl_easy_perform() failed: " << curl_easy_strerror(res));
-		}
-		else {
-			LOG("curl success");
+			if (res != CURLE_OK) {
+				LOG("curl_easy_perform() failed: " << curl_easy_strerror(res));
+			}
+			else {
+				LOG("curl success");
+			}
 		}
 		boost::this_thread::sleep(boost::posix_time::seconds(1));
 	}

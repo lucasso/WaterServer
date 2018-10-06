@@ -6,6 +6,7 @@
 #include <sys/time.h>
 
 #include <boost/assert.hpp>
+#include <boost/thread/scoped_thread.hpp>
 //#include <boost/static_assert.hpp>
 
 namespace waterServer
@@ -79,7 +80,11 @@ ClientProxyImpl::~ClientProxyImpl()
 void
 ClientProxyImpl::run()
 {
-	// do all the hard job
+	while (1)
+	{
+		DLOG("scanning slaves...");
+		boost::this_thread::sleep(boost::posix_time::seconds(5));
+	}
 }
 
 void
@@ -152,6 +157,6 @@ ClientProxy::CreateDefault(GuiProxy & guiProxy)
 	return std::unique_ptr<ClientProxy>(new ClientProxyImpl(guiProxy));
 }
 
-ClientProxy:: ~ClientProxy() = default;
+ClientProxy::~ClientProxy() = default;
 
 }

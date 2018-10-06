@@ -3,6 +3,7 @@
 #include "log4cxx/propertyconfigurator.h"
 #include "log4cxx/helpers/exception.h"
 #include <unistd.h> // sleep
+#include <boost/thread/scoped_thread.hpp>
 
 namespace waterServer
 {
@@ -20,11 +21,12 @@ int applicationMain()
 			{
 				std::unique_ptr<GuiProxy> const guiProxy = GuiProxy::CreateDefault();
 				std::unique_ptr<ClientProxy> const clientProxy = ClientProxy::CreateDefault(*guiProxy);
+				clientProxy->run();
 			}
 		catch (RestartNeededException const &)
 			{
 				LOG("server failed");
-				::sleep(1);
+				boost::this_thread::sleep(boost::posix_time::seconds(1));
 			}
 		
 	}
