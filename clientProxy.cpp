@@ -7,6 +7,8 @@
 
 #include <boost/assert.hpp>
 #include <boost/thread/scoped_thread.hpp>
+#include <boost/optional.hpp>
+#include <boost/foreach.hpp>
 //#include <boost/static_assert.hpp>
 
 namespace waterServer
@@ -23,6 +25,16 @@ namespace waterServer
 
 #define REQUEST_TIMEOUT_SEC 2
 
+struct Slave
+{
+	WaterClient::SlaveId id;
+	bool processingInGui;
+	boost::optional<water::Reply> replyToSend;
+
+	Slave(WaterClient::SlaveId idArg) :
+		id(idArg), processingInGui(false)
+	{}
+};
 
 class ClientProxyImpl : public ClientProxy
 {
@@ -30,17 +42,18 @@ class ClientProxyImpl : public ClientProxy
 
 public:
 
-	ClientProxyImpl(GuiProxy &);
+	ClientProxyImpl(GuiProxy &, std::list<WaterClient::SlaveId> const &);
 	~ClientProxyImpl();
 
 private:
 
 	GuiProxy & guiProxy;
 	std::unique_ptr<modbus_t, void(*)(modbus_t*)> ctx;
+	std::list<Slave> slaves;
 
-	// jakies vektory - co odebrano, co wysylac, odpowiedzi pod lockiem
+	char readBuffer[SEND_BUFFER_SIZE_BYTES];
 
-	void setSlave(int slaveId);
+	void processSlave(Slave &);
 
 	// null on error
 	std::unique_ptr<WaterClient::Request> readFromSlave();
@@ -49,8 +62,25 @@ private:
 	void writeToSlave();
 };
 
+std::ostream & operator<<(std::ostream & osek, WaterClient::Request const & rq)
+{
+	osek << "{sqNum:" << +rq.requestSeqNumAtBegin << ",";
+	switch (rq.requestType)
+	{
+	case water::RequestType::LOGIN_BY_USER:
+		osek << "userId:" << rq.impl.loginByUser.userId << ",pin:" << rq.impl.loginByUser.pin;
+		break;
+	case water::RequestType::LOGIN_BY_RFID:
+		osek << "rfid:" << rq.impl.loginByRfid.rfidId;
+		break;
+	default:
+		osek << "unknownType:" << static_cast<uint32_t>(rq.requestType);
+	}
+	osek << ",consumeCredit:" << rq.consumeCredit << ",sqNum:" << +rq.requestSeqNumAtEnd << "}";
+	return osek;
+}
 
-ClientProxyImpl::ClientProxyImpl(GuiProxy & guiProxyArg) :
+ClientProxyImpl::ClientProxyImpl(GuiProxy & guiProxyArg, std::list<WaterClient::SlaveId> const & slaveIdsArg) :
 	guiProxy(guiProxyArg),
 	ctx(modbus_new_rtu(DEVICE, BAUD, PARITY, DATA_BITS, STOP_BITS), modbus_free)
 {
@@ -68,6 +98,11 @@ ClientProxyImpl::ClientProxyImpl(GuiProxy & guiProxyArg) :
 	struct timeval timeoutValue = { REQUEST_TIMEOUT_SEC, 0 };
 	modbus_set_response_timeout(this->ctx.get(), &timeoutValue);
 
+	BOOST_FOREACH(WaterClient::SlaveId const slaveId, slaveIdsArg)
+	{
+		this->slaves.push_back(slaveId);
+	}
+
 	//BOOST_STATIC_ASSERT((sizeof(water::WaterClient::Request) + sizeof(uint16_t) - 1) / sizeof(uint16_t) == SEND_BUFFER_SIZE_BYTES/2);
 }
 
@@ -82,31 +117,83 @@ ClientProxyImpl::run()
 {
 	while (1)
 	{
-		DLOG("scanning slaves...");
-		boost::this_thread::sleep(boost::posix_time::seconds(5));
+		BOOST_FOREACH(Slave & slave, this->slaves)
+		{
+			this->processSlave(slave);
+			boost::this_thread::sleep(boost::posix_time::seconds(5));
+		}
 	}
 }
 
 void
-ClientProxyImpl::setSlave(int const slaveId)
+ClientProxyImpl::processSlave(Slave & slave)
 {
-	auto setSlaveResult = modbus_set_slave(this->ctx.get(), slaveId);
+	if (slave.processingInGui)
+	{
+		DLOG("skipped processing slave num " << +slave.id << " because its request is being handled in GUI");
+		return;
+	}
+
+	auto setSlaveResult = modbus_set_slave(this->ctx.get(), slave.id);
 	BOOST_ASSERT_MSG(setSlaveResult != -1, "setting slaveId failed");
+
+	if (slave.replyToSend.is_initialized())
+	{
+		DLOG("sending reply to slave num " << +slave.id);
+
+
+		return;
+	}
+
+	DLOG("trying to reqd request from slave:" << +slave.id);
+	auto requestPtr = this->readFromSlave();
+	if (requestPtr.get() == nullptr)
+	{
+		DLOG("no request from slave num " << +slave.id);
+	}
+	else
+	{
+		DLOG("request from slave num " << +slave.id << " is " << *requestPtr);
+	}
+
 }
 
 std::unique_ptr<WaterClient::Request>
 ClientProxyImpl::readFromSlave()
 {
-	uint16_t tab_reg[SEND_BUFFER_SIZE_BYTES/2];
-	auto rc = modbus_read_registers(this->ctx.get(), REQUEST_ADDRESS, SEND_BUFFER_SIZE_BYTES/2, tab_reg);
-	if (rc == -1) {
+	auto rc = modbus_read_registers(this->ctx.get(), REQUEST_ADDRESS, SEND_BUFFER_SIZE_BYTES/2, reinterpret_cast<uint16_t*>(this->readBuffer));
+	if (rc == -1)
+	{
 		DLOG("reading from slave failed, " << modbus_strerror(errno));
 		return std::unique_ptr<WaterClient::Request>();
 	}
 
 	std::unique_ptr<water::WaterClient::Request> rq{new water::WaterClient::Request()};
 
-	rq->requestSeqNumAtBegin = *reinterpret_cast<WaterClient::RequestSeqNum*>(tab_reg);
+	uint32_t offset = 0;
+	rq->requestSeqNumAtBegin = reinterpret_cast<WaterClient::RequestSeqNum*>(this->readBuffer)[0];
+	offset += sizeof(WaterClient::RequestSeqNum);
+	rq->requestType = reinterpret_cast<water::RequestType*>(this->readBuffer+offset)[0];
+	offset += sizeof(water::RequestType);
+	switch (rq->requestType)
+	{
+	case water::RequestType::LOGIN_BY_USER:
+		rq->impl.loginByUser.userId = reinterpret_cast<WaterClient::UserId*>(this->readBuffer+offset)[0];
+		offset += sizeof(WaterClient::UserId);
+		rq->impl.loginByUser.pin = reinterpret_cast<WaterClient::Pin*>(this->readBuffer+offset)[0];
+		offset += sizeof(WaterClient::Pin);
+		break;
+	case water::RequestType::LOGIN_BY_RFID:
+		rq->impl.loginByRfid.rfidId = reinterpret_cast<WaterClient::RfidId*>(this->readBuffer+offset)[0];
+		offset += sizeof(WaterClient::RfidId);
+		break;
+	default:
+		DLOG("invalid requestType:" << static_cast<uint32_t>(rq->requestType));
+		return std::unique_ptr<WaterClient::Request>();
+	}
+	rq->consumeCredit = reinterpret_cast<WaterClient::Credit*>(this->readBuffer+offset)[0];
+	offset += sizeof(WaterClient::Credit);
+	rq->requestSeqNumAtEnd = reinterpret_cast<WaterClient::RequestSeqNum*>(this->readBuffer+offset)[0];
 
 	return std::move(rq);
 	/*
@@ -133,6 +220,7 @@ ClientProxyImpl::readFromSlave()
 
   return tab_reg[0];
 	*/
+
 }
 
 
@@ -152,9 +240,9 @@ ClientProxyImpl::writeToSlave()
 }
 
 std::unique_ptr<ClientProxy>
-ClientProxy::CreateDefault(GuiProxy & guiProxy)
+ClientProxy::CreateDefault(GuiProxy & guiProxy, std::list<WaterClient::SlaveId> const & slaveIds)
 {
-	return std::unique_ptr<ClientProxy>(new ClientProxyImpl(guiProxy));
+	return std::unique_ptr<ClientProxy>(new ClientProxyImpl(guiProxy, slaveIds));
 }
 
 ClientProxy::~ClientProxy() = default;

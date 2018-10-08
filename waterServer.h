@@ -4,6 +4,7 @@
 #include "waterSharedTypes.h"
 #undef _WATER_SERVER
 
+#include <list>
 #include <memory> // unique_ptr
 #include <log4cxx/logger.h>
 
@@ -44,7 +45,7 @@ public:
 
 	virtual ~ClientProxy();
 
-	static std::unique_ptr<ClientProxy> CreateDefault(GuiProxy &);
+	static std::unique_ptr<ClientProxy> CreateDefault(GuiProxy &, std::list<WaterClient::SlaveId> const &);
 
 	virtual void run() = 0;
 };

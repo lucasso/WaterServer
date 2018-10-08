@@ -14,13 +14,18 @@ int applicationMain()
 {
 	GuiProxy::GlobalInit();
 
+	std::list<WaterClient::SlaveId> slaveIds;
+	slaveIds.push_back(100);
+	slaveIds.push_back(101);
+	slaveIds.push_back(102);
+
 	while (1)
 	{
 		LOG("starting application");
 		try
 			{
 				std::unique_ptr<GuiProxy> const guiProxy = GuiProxy::CreateDefault();
-				std::unique_ptr<ClientProxy> const clientProxy = ClientProxy::CreateDefault(*guiProxy);
+				std::unique_ptr<ClientProxy> const clientProxy = ClientProxy::CreateDefault(*guiProxy, slaveIds);
 				clientProxy->run();
 			}
 		catch (RestartNeededException const &)

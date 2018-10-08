@@ -1,0 +1,10 @@
+making debian packages
+https://github.com/agx/git-buildpackage
++ jenkins
+description: https://honk.sigxcpu.org/piki/projects/git-buildpackage/
+
+thread about automation: https://unix.stackexchange.com/questions/198290/package-build-system-for-debian-like-fedora-koji
+
+
+docker z raspbianem
+https://hub.docker.com/r/resin/rpi-raspbian/
