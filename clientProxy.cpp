@@ -45,6 +45,9 @@ public:
 	ClientProxyImpl(GuiProxy &, std::list<WaterClient::SlaveId> const &);
 	~ClientProxyImpl();
 
+	template <class T>
+	static void readWrite(T &, T const);
+
 private:
 
 	GuiProxy & guiProxy;
@@ -158,6 +161,12 @@ ClientProxyImpl::processSlave(Slave & slave)
 
 }
 
+template <class T> void
+ClientProxyImpl::readWrite(T & rqItem, T const rqValue)
+{
+	rqItem = rqValue;
+}
+
 std::unique_ptr<WaterClient::Request>
 ClientProxyImpl::readFromSlave()
 {
@@ -169,58 +178,9 @@ ClientProxyImpl::readFromSlave()
 	}
 
 	std::unique_ptr<water::WaterClient::Request> rq{new water::WaterClient::Request()};
-
-	uint32_t offset = 0;
-	rq->requestSeqNumAtBegin = reinterpret_cast<WaterClient::RequestSeqNum*>(this->readBuffer)[0];
-	offset += sizeof(WaterClient::RequestSeqNum);
-	rq->requestType = reinterpret_cast<water::RequestType*>(this->readBuffer+offset)[0];
-	offset += sizeof(water::RequestType);
-	switch (rq->requestType)
-	{
-	case water::RequestType::LOGIN_BY_USER:
-		rq->impl.loginByUser.userId = reinterpret_cast<WaterClient::UserId*>(this->readBuffer+offset)[0];
-		offset += sizeof(WaterClient::UserId);
-		rq->impl.loginByUser.pin = reinterpret_cast<WaterClient::Pin*>(this->readBuffer+offset)[0];
-		offset += sizeof(WaterClient::Pin);
-		break;
-	case water::RequestType::LOGIN_BY_RFID:
-		rq->impl.loginByRfid.rfidId = reinterpret_cast<WaterClient::RfidId*>(this->readBuffer+offset)[0];
-		offset += sizeof(WaterClient::RfidId);
-		break;
-	default:
-		DLOG("invalid requestType:" << static_cast<uint32_t>(rq->requestType));
-		return std::unique_ptr<WaterClient::Request>();
-	}
-	rq->consumeCredit = reinterpret_cast<WaterClient::Credit*>(this->readBuffer+offset)[0];
-	offset += sizeof(WaterClient::Credit);
-	rq->requestSeqNumAtEnd = reinterpret_cast<WaterClient::RequestSeqNum*>(this->readBuffer+offset)[0];
-
-	return std::move(rq);
-	/*
-  reinterpret_cast<water::WaterClient::Request*>(tab_reg);
-  std::cout << "requestSeqNumAtBegin:" << +rq->requestSeqNumAtBegin << ", requestType:" << static_cast<uint32_t>(rq->requestType);
-  switch (rq->requestType)
-  {
-  case water::RequestType::LOGIN_BY_USER:
-	  std::cout << ", userId:" << rq->impl.loginByUser.userId << ", pin:" << rq->impl.loginByUser.userId;
-	  break;
-
-  case water::RequestType::LOGIN_BY_RFID:
-	  std::cout << ", rfid:" << rq->impl.loginByRfid.rfidId ;
-	  break;
-  default:
-	  std::cout << "unknown type";
-  }
-
-  std::cout << ", consumeCredit:" << rq->consumeCredit << ", requestSeqNumAtEnd:" << +rq->requestSeqNumAtEnd  << "\n";
-
-  //for (int i=0; i < rc; i++) {
-	//std::cout << "reg[" << i << "] = " << tab_reg[i] << "\n";
-  //}
-
-  return tab_reg[0];
-	*/
-
+	bool const serializeSuccess = water::serializeRequest<ClientProxyImpl>(*rq, this->readBuffer);
+	
+	return serializeSuccess ? std::move(rq) : std::unique_ptr<WaterClient::Request>();;
 }
 
 
