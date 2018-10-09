@@ -39,6 +39,7 @@ private:
 
 };
 
+GuiProxy::Callback::~Callback() = default;
 
 std::unique_ptr<GuiProxy>
 GuiProxy::CreateDefault()

@@ -21,11 +21,13 @@ public:
 
 	class Callback
 	{
+	public:
+
 		virtual void serverInternalError() = 0;
 		virtual void notFound() = 0;
 		virtual void success(WaterClient::Credit creditAvail) = 0;
 
-		virtual ~Callback() = default;
+		virtual ~Callback();
 	};
 
 
