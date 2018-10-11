@@ -34,7 +34,7 @@ public:
 	virtual void handleIdPinRequest(WaterClient::UserId, WaterClient::Pin, WaterClient::Credit creditToConsume, Callback*) = 0;
 	virtual void handleRfidRequest(WaterClient::RfidId, WaterClient::Credit creditToConsume, Callback*) = 0;
 
-	static std::unique_ptr<GuiProxy> CreateDefault();
+	static std::unique_ptr<GuiProxy> CreateDefault(std::string const & guiUrl);
 	static void GlobalInit();
 	static void GlobalCleanup();
 

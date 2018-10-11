@@ -23,7 +23,7 @@ class GuiProxyImpl : public GuiProxy
 
 public:
 
-	GuiProxyImpl();
+	GuiProxyImpl(std::string const & guiUrl);
 	~GuiProxyImpl();
 
 private:
@@ -42,9 +42,9 @@ private:
 GuiProxy::Callback::~Callback() = default;
 
 std::unique_ptr<GuiProxy>
-GuiProxy::CreateDefault()
+GuiProxy::CreateDefault(std::string const & guiUrl)
 {
-	return std::unique_ptr<GuiProxy>(new GuiProxyImpl());
+	return std::unique_ptr<GuiProxy>(new GuiProxyImpl(guiUrl));
 }
 
 void
@@ -73,10 +73,11 @@ void GuiProxyImpl::handleRfidRequest(WaterClient::RfidId rfidId, WaterClient::Cr
 	this->requests.push_back(GuiRequest{this->urlPrefix + "getuser_rfid", params, callback});	
 }
 
-GuiProxyImpl::GuiProxyImpl() :
-	urlPrefix("http://localhost:3000/"),
+GuiProxyImpl::GuiProxyImpl(std::string const & urlPrefixArg) :
+	urlPrefix(urlPrefixArg),
 	worker{boost::thread(&GuiProxyImpl::workerMain, this)}
 {
+	LOG("using url: " << this->urlPrefix);
 }
 
 

@@ -28,19 +28,34 @@ namespace waterServer
 class Slave : public GuiProxy::Callback
 {
 public:
-	WaterClient::SlaveId id;
-	bool processingInGui;
 
 	Slave(WaterClient::SlaveId idArg) :
 		id(idArg), processingInGui(false), lastReceivedSeqNum(0)
 	{}
 
+	Slave(Slave && other) :
+		replyToSendProtected(std::move(other.replyToSendProtected)),
+		replyToSend(std::move(other.replyToSend)),
+		id(other.id), processingInGui(other.processingInGui),
+		lastReceivedSeqNum(other.lastReceivedSeqNum)
+	{
+	}
+
 	~Slave() = default;
+
+	std::unique_ptr<WaterClient::Request> readRequest(modbus_t* ctx);
+
+	template <class T> static void readWriteRequest(T &, T);
+	template <class T> static void readWriteReply(T, T &);
 
 private:
 
 	boost::mutex mtx;
+	std::unique_ptr<water::Reply> replyToSendProtected;
 	std::unique_ptr<water::Reply> replyToSend;
+
+	WaterClient::SlaveId id;
+	bool processingInGui;
 	WaterClient::RequestSeqNum lastReceivedSeqNum;
 
 	virtual void serverInternalError();
@@ -49,7 +64,9 @@ private:
 
 	void setReply(
 		WaterClient::LoginReply::Status,
-		Option<WaterClient::Credit> creditAvail = Option<WaterClient::Credit>());
+		WaterClient::Credit creditAvail = 0);
+
+	static char buffer[SEND_BUFFER_SIZE_BYTES];
 };
 
 class ClientProxyImpl : public ClientProxy
@@ -61,29 +78,96 @@ public:
 	ClientProxyImpl(GuiProxy &, std::list<WaterClient::SlaveId> const &);
 	~ClientProxyImpl();
 
-	template <class T>
-	static void readWrite(T &, T const);
-
 private:
 
 	GuiProxy & guiProxy;
 	std::unique_ptr<modbus_t, void(*)(modbus_t*)> ctx;
 	std::list<Slave> slaves;
 
-	char readBuffer[SEND_BUFFER_SIZE_BYTES];
-
 	void processSlave(Slave &);
-
-	// null on error
-	std::unique_ptr<WaterClient::Request> readFromSlave();
-
-	void sendToSlave();
-	void writeToSlave();
 };
 
+char Slave::buffer[SEND_BUFFER_SIZE_BYTES];
+
+std::unique_ptr<WaterClient::Request>
+Slave::readRequest(modbus_t* ctx)
+{
+	auto setSlaveResult = modbus_set_slave(ctx, this->id);
+	BOOST_ASSERT_MSG(setSlaveResult != -1, "setting slaveId failed");
+
+	if (this->processingInGui)
+	{
+		boost::mutex::scoped_lock lck(this->mtx);
+		if (this->replyToSendProtected.get() != nullptr)
+		{
+			this->replyToSend = std::move(this->replyToSendProtected);
+			this->processingInGui = false;
+		}
+	}
+
+	if (this->replyToSend.get())
+	{
+		DLOG("sending reply to slave num " << +this->id);
+		water::serializeReply<Slave>(*this->replyToSend, Slave::buffer);
+
+		if (modbus_write_registers(
+			ctx, REPLY_ADDRESS, SEND_BUFFER_SIZE_BYTES/2,
+			reinterpret_cast<uint16_t*>(Slave::buffer)) != 1)
+		{
+			ELOG("writing reply failed " << modbus_strerror(errno));
+		}
+//		else
+//		{
+//			DLOG("success writing reply:" << *this->replyToSend);
+//		}
+	}
+
+	if (this->processingInGui)
+	{
+		DLOG("skipped processing slave num " << +this->id << " because its request is being handled in GUI");
+		return std::unique_ptr<WaterClient::Request>();
+	}
+
+	DLOG("trying to read request from slave:" << +this->id);
+
+	auto rc = modbus_read_registers(ctx, REQUEST_ADDRESS, SEND_BUFFER_SIZE_BYTES/2, reinterpret_cast<uint16_t*>(Slave::buffer));
+	if (rc == -1)
+	{
+		DLOG("reading from slave failed, " << modbus_strerror(errno));
+		return std::unique_ptr<WaterClient::Request>();
+	}
+
+	std::unique_ptr<water::WaterClient::Request> rq{new water::WaterClient::Request()};
+	bool const serializeSuccess = water::serializeRequest<Slave>(*rq, Slave::buffer);
+	if (!serializeSuccess)
+	{
+		ELOG("failed to serialize request");
+		return std::unique_ptr<WaterClient::Request>();
+	}
+
+	if (rq->requestSeqNumAtBegin != rq->requestSeqNumAtEnd)
+	{
+		ELOG("request ignored because seq nums do not match, start:"
+			<< rq->requestSeqNumAtBegin << ", end:" << rq->requestSeqNumAtEnd);
+		return std::unique_ptr<WaterClient::Request>();
+	}
+
+	DLOG("request from slave num " << (+this->id));
+	if (rq->requestSeqNumAtBegin == this->lastReceivedSeqNum)
+	{
+		DLOG("ignoring already received message with seqNum:" << this->lastReceivedSeqNum);
+		return std::unique_ptr<WaterClient::Request>();
+	}
+
+	this->lastReceivedSeqNum = rq->requestSeqNumAtBegin;
+	this->processingInGui = true;
+
+	return std::move(rq);
+}
+
 void Slave::setReply(
-	WaterClient::LoginReply::Status status,
-	Option<WaterClient::Credit> creditAvail)
+	WaterClient::LoginReply::Status const status,
+	WaterClient::Credit const creditAvail)
 {
 	std::unique_ptr<water::Reply> reply{ new water::Reply{
 		this->lastReceivedSeqNum,
@@ -92,7 +176,7 @@ void Slave::setReply(
 
 	{
 		boost::mutex::scoped_lock lck(this->mtx);
-		this->replyToSend.swap(reply);
+		this->replyToSendProtected.swap(reply);
 	}
 
 	BOOST_ASSERT_MSG(reply.get() == nullptr, "reply came while previus was not yet delivered");
@@ -128,6 +212,26 @@ std::ostream & operator<<(std::ostream & osek, WaterClient::Request const & rq)
 		osek << "unknownType:" << static_cast<uint32_t>(rq.requestType);
 	}
 	osek << ",consumeCredit:" << rq.consumeCredit << ",sqNum:" << +rq.requestSeqNumAtEnd << "}";
+	return osek;
+}
+
+std::ostream & operator<<(std::ostream & osek, water::Reply const & reply)
+{
+	osek << "{sqNum:" << +reply.replySeqNumAtBegin << ",status:";
+	switch (reply.impl.status)
+	{
+	case WaterClient::LoginReply::Status::SUCCESS:
+		osek << "SUCCESS"; break;
+	case WaterClient::LoginReply::Status::NOT_FOUND:
+		osek << "NOT_FOUND"; break;
+	case WaterClient::LoginReply::Status::TIMEOUT:
+		osek << "TIMEOUT"; break;
+	case WaterClient::LoginReply::Status::SERVER_INTERNAL_ERROR:
+		osek << "SERVER_INTERNAL_ERROR"; break;
+	default:
+		osek << "unknownStatus:" << static_cast<uint32_t>(reply.impl.status);
+	}
+	osek << ",creditAvail:" << reply.impl.creditAvail << "}";
 	return osek;
 }
 
@@ -179,42 +283,12 @@ ClientProxyImpl::run()
 void
 ClientProxyImpl::processSlave(Slave & slave)
 {
-	auto setSlaveResult = modbus_set_slave(this->ctx.get(), slave.id);
-	BOOST_ASSERT_MSG(setSlaveResult != -1, "setting slaveId failed");
-
-	if (slave.replyToSend.get())
-	{
-		DLOG("sending reply to slave num " << +slave.id);
-		slave.processingInGui = false;
-		// TODO: implement
-
-		return;
-	}
-
-	if (slave.processingInGui)
-	{
-		DLOG("skipped processing slave num " << +slave.id << " because its request is being handled in GUI");
-		return;
-	}
-
-	DLOG("trying to reqd request from slave:" << +slave.id);
-	auto requestPtr = this->readFromSlave();
+	auto requestPtr = slave.readRequest(this->ctx.get());
 
 	if (requestPtr.get() == nullptr)
 	{
-		DLOG("reading from slave num " << +slave.id << " failed");
 		return;
 	}
-
-	DLOG("request from slave num " << +slave.id << " is " << *requestPtr);
-	if (requestPtr->requestSeqNumAtBegin == slave.lastReceivedSeqNum)
-	{
-		DLOG("ignoring already received message with seqNum:" << slave.lastReceivedSeqNum);
-		return;
-	}
-
-	slave.lastReceivedSeqNum = requestPtr->requestSeqNumAtBegin;
-	slave.processingInGui = true;
 
 	switch (requestPtr->requestType)
 	{
@@ -234,58 +308,22 @@ ClientProxyImpl::processSlave(Slave & slave)
 }
 
 template <class T> void
-ClientProxyImpl::readWrite(T & rqItem, T const rqValue)
+Slave::readWriteRequest(T & inMem, T const inBuffer)
 {
-	rqItem = rqValue;
+	inMem = inBuffer;
 }
 
-std::unique_ptr<WaterClient::Request>
-ClientProxyImpl::readFromSlave()
+template <class T> void
+Slave::readWriteReply(T const inMem, T & inBuffer)
 {
-	auto rc = modbus_read_registers(this->ctx.get(), REQUEST_ADDRESS, SEND_BUFFER_SIZE_BYTES/2, reinterpret_cast<uint16_t*>(this->readBuffer));
-	if (rc == -1)
-	{
-		DLOG("reading from slave failed, " << modbus_strerror(errno));
-		return std::unique_ptr<WaterClient::Request>();
-	}
-
-	std::unique_ptr<water::WaterClient::Request> rq{new water::WaterClient::Request()};
-	bool const serializeSuccess = water::serializeRequest<ClientProxyImpl>(*rq, this->readBuffer);
-	if (!serializeSuccess)
-	{
-		ELOG("failed to serialize request");
-		return std::unique_ptr<WaterClient::Request>();
-	}
-	
-	if (rq->requestSeqNumAtBegin != rq->requestSeqNumAtEnd)
-	{
-		ELOG("request ignored because seq nums do not match, start:"
-			<< rq->requestSeqNumAtBegin << ", end:" << rq->requestSeqNumAtEnd);
-		return std::unique_ptr<WaterClient::Request>();
-	}
-
-	return std::move(rq);
+	inBuffer = inMem;
 }
 
-
-void
-ClientProxyImpl::writeToSlave()
-{
-	int value = 8;
-	if (modbus_write_register(this->ctx.get(), 0x7000, value) != 1)
-		{
-			std::cerr << "writing register failed " << modbus_strerror(errno) << "\n";
-		}
-	else 
-		{
-			std::cout << "writing value:" << value << " succeeded\n";
-			return;
-		}
-}
 
 std::unique_ptr<ClientProxy>
 ClientProxy::CreateDefault(GuiProxy & guiProxy, std::list<WaterClient::SlaveId> const & slaveIds)
 {
+	DLOG("pooling " << slaveIds.size() << " slaves");
 	return std::unique_ptr<ClientProxy>(new ClientProxyImpl(guiProxy, slaveIds));
 }
 
