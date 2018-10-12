@@ -1,8 +1,9 @@
+#ifndef _WATER_SERVER
+#define _WATER_SERVER
 #include <iostream>
 
-#define _WATER_SERVER
+
 #include "waterSharedTypes.h"
-#undef _WATER_SERVER
 
 #include <list>
 #include <memory> // unique_ptr
@@ -41,16 +42,31 @@ public:
 	virtual ~GuiProxy() = default;
 };
 
+class ModbusServer
+{
+public:
+	virtual ~ModbusServer();
+
+	virtual void setSlave(int) = 0;
+	virtual int readRegisters(int addr, int nb, uint16_t *dest) = 0;
+	virtual int writeRegisters(int addr, int nb, const uint16_t *data) = 0;
+
+	static std::unique_ptr<ModbusServer> CreateDefault(
+		const char *device, int baud, char parity, int data_bit, int stop_bit, int timeoutSec);
+};
+
 class ClientProxy
 {
 public:
 
 	virtual ~ClientProxy();
 
-	static std::unique_ptr<ClientProxy> CreateDefault(GuiProxy &, std::list<WaterClient::SlaveId> const &);
+	static std::unique_ptr<ClientProxy> CreateDefault(GuiProxy &, ModbusServer &, std::list<WaterClient::SlaveId> const &);
 
 	virtual void run() = 0;
 };
+
+
 
 extern log4cxx::LoggerPtr logger;
 
@@ -64,3 +80,4 @@ extern log4cxx::LoggerPtr logger;
 	
 }
 
+#endif // _WATER_SERVER

@@ -1,11 +1,9 @@
 #include "waterServer.h"
-#include <modbus/modbus.h>
 
 #include <errno.h>
 #include <unistd.h>
 #include <sys/time.h>
 
-#include <boost/assert.hpp>
 #include <boost/thread/scoped_thread.hpp>
 #include <boost/optional.hpp>
 #include <boost/foreach.hpp>
@@ -13,17 +11,6 @@
 
 namespace waterServer
 {
-
-// modbus functions documentation
-// http://libmodbus.org/docs/v3.0.6/
-
-#define DEVICE "/dev/water"
-#define BAUD 9600
-#define PARITY 'N'
-#define DATA_BITS 8
-#define STOP_BITS 1
-
-#define REQUEST_TIMEOUT_SEC 2
 
 class Slave : public GuiProxy::Callback
 {
@@ -43,7 +30,7 @@ public:
 
 	~Slave() = default;
 
-	std::unique_ptr<WaterClient::Request> readRequest(modbus_t* ctx);
+	std::unique_ptr<WaterClient::Request> readRequest(ModbusServer &);
 
 	template <class T> static void readWriteRequest(T &, T);
 	template <class T> static void readWriteReply(T, T &);
@@ -75,13 +62,12 @@ class ClientProxyImpl : public ClientProxy
 
 public:
 
-	ClientProxyImpl(GuiProxy &, std::list<WaterClient::SlaveId> const &);
-	~ClientProxyImpl();
+	ClientProxyImpl(GuiProxy &, ModbusServer &, std::list<WaterClient::SlaveId> const &);
 
 private:
 
 	GuiProxy & guiProxy;
-	std::unique_ptr<modbus_t, void(*)(modbus_t*)> ctx;
+	ModbusServer & modbusServer;
 	std::list<Slave> slaves;
 
 	void processSlave(Slave &);
@@ -90,10 +76,9 @@ private:
 char Slave::buffer[SEND_BUFFER_SIZE_BYTES];
 
 std::unique_ptr<WaterClient::Request>
-Slave::readRequest(modbus_t* ctx)
+Slave::readRequest(ModbusServer & ms)
 {
-	auto setSlaveResult = modbus_set_slave(ctx, this->id);
-	BOOST_ASSERT_MSG(setSlaveResult != -1, "setting slaveId failed");
+	ms.setSlave(this->id);
 
 	if (this->processingInGui)
 	{
@@ -109,13 +94,8 @@ Slave::readRequest(modbus_t* ctx)
 	{
 		DLOG("sending reply to slave num " << +this->id);
 		water::serializeReply<Slave>(*this->replyToSend, Slave::buffer);
-
-		if (modbus_write_registers(
-			ctx, REPLY_ADDRESS, SEND_BUFFER_SIZE_BYTES/2,
-			reinterpret_cast<uint16_t*>(Slave::buffer)) != 1)
-		{
-			ELOG("writing reply failed " << modbus_strerror(errno));
-		}
+		ms.writeRegisters(
+			REPLY_ADDRESS, SEND_BUFFER_SIZE_BYTES/2, reinterpret_cast<uint16_t*>(Slave::buffer));
 //		else
 //		{
 //			DLOG("success writing reply:" << *this->replyToSend);
@@ -130,10 +110,9 @@ Slave::readRequest(modbus_t* ctx)
 
 	DLOG("trying to read request from slave:" << +this->id);
 
-	auto rc = modbus_read_registers(ctx, REQUEST_ADDRESS, SEND_BUFFER_SIZE_BYTES/2, reinterpret_cast<uint16_t*>(Slave::buffer));
+	auto rc = ms.readRegisters(REQUEST_ADDRESS, SEND_BUFFER_SIZE_BYTES/2, reinterpret_cast<uint16_t*>(Slave::buffer));
 	if (rc == -1)
 	{
-		DLOG("reading from slave failed, " << modbus_strerror(errno));
 		return std::unique_ptr<WaterClient::Request>();
 	}
 
@@ -235,36 +214,17 @@ std::ostream & operator<<(std::ostream & osek, water::Reply const & reply)
 	return osek;
 }
 
-ClientProxyImpl::ClientProxyImpl(GuiProxy & guiProxyArg, std::list<WaterClient::SlaveId> const & slaveIdsArg) :
+ClientProxyImpl::ClientProxyImpl(
+	GuiProxy & guiProxyArg, ModbusServer & modbusServerArg, std::list<WaterClient::SlaveId> const & slaveIdsArg) :
 	guiProxy(guiProxyArg),
-	ctx(modbus_new_rtu(DEVICE, BAUD, PARITY, DATA_BITS, STOP_BITS), modbus_free)
+	modbusServer(modbusServerArg)
 {
-	if (this->ctx.get() == nullptr) {
-		ELOG("unable to create the libmodbus context, " << modbus_strerror(errno));
-		throw RestartNeededException();
-	}
-
-	auto connectResult = modbus_connect(this->ctx.get());
-	if (connectResult == -1) {
-		ELOG("modbus_connect failed: " << modbus_strerror(errno));
-		throw RestartNeededException();
-	}
-
-	struct timeval timeoutValue = { REQUEST_TIMEOUT_SEC, 0 };
-	modbus_set_response_timeout(this->ctx.get(), &timeoutValue);
-
 	BOOST_FOREACH(WaterClient::SlaveId const slaveId, slaveIdsArg)
 	{
 		this->slaves.push_back(slaveId);
 	}
 
 	//BOOST_STATIC_ASSERT((sizeof(water::WaterClient::Request) + sizeof(uint16_t) - 1) / sizeof(uint16_t) == SEND_BUFFER_SIZE_BYTES/2);
-}
-
-ClientProxyImpl::~ClientProxyImpl()
-{
-	LOG("closing modbus connection");
-	modbus_close(this->ctx.get());
 }
 
 void
@@ -283,7 +243,7 @@ ClientProxyImpl::run()
 void
 ClientProxyImpl::processSlave(Slave & slave)
 {
-	auto requestPtr = slave.readRequest(this->ctx.get());
+	auto requestPtr = slave.readRequest(this->modbusServer);
 
 	if (requestPtr.get() == nullptr)
 	{
@@ -321,10 +281,10 @@ Slave::readWriteReply(T const inMem, T & inBuffer)
 
 
 std::unique_ptr<ClientProxy>
-ClientProxy::CreateDefault(GuiProxy & guiProxy, std::list<WaterClient::SlaveId> const & slaveIds)
+ClientProxy::CreateDefault(GuiProxy & guiProxy, ModbusServer & modbusServer, std::list<WaterClient::SlaveId> const & slaveIds)
 {
 	DLOG("pooling " << slaveIds.size() << " slaves");
-	return std::unique_ptr<ClientProxy>(new ClientProxyImpl(guiProxy, slaveIds));
+	return std::unique_ptr<ClientProxy>(new ClientProxyImpl(guiProxy, modbusServer, slaveIds));
 }
 
 ClientProxy::~ClientProxy() = default;

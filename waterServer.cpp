@@ -16,7 +16,10 @@ log4cxx::LoggerPtr logger{log4cxx::Logger::getLogger("waterServer")};
 
 int applicationMain(
 	std::string const & guiUrl,
-	std::list<WaterClient::SlaveId> const & slaveIds
+	std::list<WaterClient::SlaveId> const & slaveIds,
+	std::string const & device,
+	int baud, char parity, int dataBits, int stopBits,
+	int timeoutSec
 )
 {
 	GuiProxy::GlobalInit();
@@ -27,7 +30,11 @@ int applicationMain(
 		try
 		{
 			std::unique_ptr<GuiProxy> const guiProxy = GuiProxy::CreateDefault(guiUrl);
-			std::unique_ptr<ClientProxy> const clientProxy = ClientProxy::CreateDefault(*guiProxy, slaveIds);
+			std::unique_ptr<ModbusServer> const modbusServer = ModbusServer::CreateDefault(
+				device.c_str(), baud, parity, dataBits, stopBits, timeoutSec
+			);
+			std::unique_ptr<ClientProxy> const clientProxy = ClientProxy::CreateDefault(
+				*guiProxy, *modbusServer, slaveIds);
 			clientProxy->run();
 		}
 		catch (RestartNeededException const &)
@@ -77,7 +84,13 @@ int main(int argc, char** argv)
 		log4cxx::PropertyConfigurator::configure(argv[2]);
 		return waterServer::applicationMain(
 			pt.get<std::string>("guiurl"),
-			waterServer::makeSlavesArray(pt.get<std::string>("slaves"))
+			waterServer::makeSlavesArray(pt.get<std::string>("slaves")),
+			pt.get<std::string>("device"),
+			pt.get<int>("baud"),
+			pt.get<char>("parity"),
+			pt.get<int>("dataBits"),
+			pt.get<int>("stopBits"),
+			pt.get<int>("timeoutSec")
 		);
 	}
 	catch(log4cxx::helpers::Exception const &)
