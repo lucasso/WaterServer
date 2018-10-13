@@ -131,7 +131,7 @@ Slave::readRequest(ModbusServer & ms)
 		return std::unique_ptr<WaterClient::Request>();
 	}
 
-	DLOG("request from slave num " << (+this->id));
+	DLOG("request from slave num " << (+this->id) << " is " << *rq);
 	if (rq->requestSeqNumAtBegin == this->lastReceivedSeqNum)
 	{
 		DLOG("ignoring already received message with seqNum:" << this->lastReceivedSeqNum);

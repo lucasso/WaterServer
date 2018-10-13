@@ -50,6 +50,15 @@ public:
 		{
 			DLOG("modbus reading failed " << modbus_strerror(errno));
 		}
+//		else
+//		{
+//			std::ostringstream oss;
+//			for (int i = 0; i < nb; ++i)
+//			{
+//				oss << dest[i] << ";";
+//			}
+//			DLOG("received " << oss.str());
+//		}
 		return retVal;
 	}
 

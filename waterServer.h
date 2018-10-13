@@ -66,7 +66,8 @@ public:
 	virtual void run() = 0;
 };
 
-
+std::ostream & operator<<(std::ostream &, WaterClient::Request const &);
+std::ostream & operator<<(std::ostream &, water::Reply const &);
 
 extern log4cxx::LoggerPtr logger;
 
