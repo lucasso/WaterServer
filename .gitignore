@@ -37,6 +37,7 @@
 waterServer.log*
 .settings/*
 waterServer
+guiProxyTest
 Debug/*
 .cproject
 .project

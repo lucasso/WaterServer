@@ -15,11 +15,21 @@ struct GuiRequest
 	GuiProxy::Callback* callback;
 };
 
+std::ostream & operator<<(std::ostream & osek, GuiRequest const & rq)
+{
+	osek << "{url:" << rq.path << ",params:" << rq.postParams << "}";
+	return osek;
+}
+
 class GuiProxyImpl : public GuiProxy
 {
 
 	virtual void handleIdPinRequest(WaterClient::UserId userId, WaterClient::Pin pin, WaterClient::Credit creditToConsume, GuiProxy::Callback*);
 	virtual void handleRfidRequest(WaterClient::RfidId rfidId, WaterClient::Credit creditToConsume, GuiProxy::Callback*);
+
+	void handleRequestImpl(
+		std::string urlRequestName, std::string urlRequestParams,
+		WaterClient::Credit creditToConsume, GuiProxy::Callback* callback);
 
 public:
 
@@ -59,19 +69,39 @@ GuiProxy::GlobalCleanup()
 	curl_global_cleanup();
 }
 
-void GuiProxyImpl::handleIdPinRequest(WaterClient::UserId userId, WaterClient::Pin pin, WaterClient::Credit creditToConsume, GuiProxy::Callback* callback)
+void
+GuiProxyImpl::handleIdPinRequest(WaterClient::UserId userId, WaterClient::Pin pin, WaterClient::Credit creditToConsume, GuiProxy::Callback* callback)
 {
-	std::string params = "client_id=" + boost::lexical_cast<std::string>(userId) + "&pin=" + boost::lexical_cast<std::string>(pin);
-	if (creditToConsume > 0) params += "&=consumed_credit=" + boost::lexical_cast<std::string>(creditToConsume);
-	this->requests.push_back(GuiRequest{this->urlPrefix + "getuser_idpin", params, callback});
+	this->handleRequestImpl(
+		"getuser_idpin",
+		std::string("client_id=") + boost::lexical_cast<std::string>(userId) + "&pin=" + boost::lexical_cast<std::string>(pin),
+		creditToConsume,
+		callback);
 }
 
 void GuiProxyImpl::handleRfidRequest(WaterClient::RfidId rfidId, WaterClient::Credit creditToConsume, GuiProxy::Callback* callback)
 {
-	std::string params = "client_rfid=" + boost::lexical_cast<std::string>(rfidId);
-	if (creditToConsume > 0) params += "&=consumed_credit=" + boost::lexical_cast<std::string>(creditToConsume);
-	this->requests.push_back(GuiRequest{this->urlPrefix + "getuser_rfid", params, callback});	
+	this->handleRequestImpl(
+		"getuser_rfid",
+		std::string("client_rfid=") + boost::lexical_cast<std::string>(rfidId),
+		creditToConsume,
+		callback);
 }
+
+void
+GuiProxyImpl::handleRequestImpl(
+	std::string urlRequestName, std::string urlRequestParams, WaterClient::Credit creditToConsume, GuiProxy::Callback* callback)
+{
+	if (creditToConsume > 0) urlRequestParams += "&=consumed_credit=" + boost::lexical_cast<std::string>(creditToConsume);
+
+	{
+		boost::mutex::scoped_lock lck(this->mtx);
+		this->requests.push_back(GuiRequest{this->urlPrefix + "/" + urlRequestName, urlRequestParams, callback});
+	}
+	this->cnd.notify_one();
+}
+
+
 
 GuiProxyImpl::GuiProxyImpl(std::string const & urlPrefixArg) :
 	urlPrefix(urlPrefixArg),
@@ -91,25 +121,38 @@ GuiProxyImpl::~GuiProxyImpl()
 void
 GuiProxyImpl::workerMain()
 {
-	while (1) {
+	while (true)
+	{
+		GuiRequest requestToProcess;
 		{
-			std::unique_ptr<CURL, void(*)(CURL*)> curl(curl_easy_init(), curl_easy_cleanup);
-			BOOST_ASSERT_MSG(curl.get() != nullptr, "curl initialization failed");
-		
-			curl_easy_setopt(curl.get(), CURLOPT_URL, "http://localhost:3000/getuser_rfid");
-			curl_easy_setopt(curl.get(), CURLOPT_POSTFIELDS, "client_rfid=96337");
- 
-
-			CURLcode res = curl_easy_perform(curl.get());
-	
-			if (res != CURLE_OK) {
-				LOG("curl_easy_perform() failed: " << curl_easy_strerror(res));
-			}
-			else {
-				LOG("curl success");
-			}
+			boost::mutex::scoped_lock lck(this->mtx);
+			while (this->requests.empty()) this->cnd.wait(lck);
+			requestToProcess = this->requests.front();
+			this->requests.pop_front();
 		}
-		boost::this_thread::sleep(boost::posix_time::seconds(1));
+
+		LOG("sending request: " << requestToProcess);
+
+		std::unique_ptr<CURL, void(*)(CURL*)> curl(curl_easy_init(), curl_easy_cleanup);
+		BOOST_ASSERT_MSG(curl.get() != nullptr, "curl initialization failed");
+		
+		curl_easy_setopt(curl.get(), CURLOPT_URL, requestToProcess.path.c_str());
+		curl_easy_setopt(curl.get(), CURLOPT_POSTFIELDS, requestToProcess.postParams.c_str());
+ 
+		CURLcode res = curl_easy_perform(curl.get());
+	
+		switch (res)
+		{
+		case CURLE_OK:
+			LOG("success");
+			requestToProcess.callback->success(13);
+			break;
+
+		default:
+			LOG("request failed, curlCode:" << res << ", error:" << curl_easy_strerror(res));
+			requestToProcess.callback->serverInternalError();
+			break;
+		}
 	}
 }
 

@@ -12,9 +12,8 @@ clientProxy.o:
 modbusServer.o:
 	g++ -std=c++1y -I../WaterClient -Wall -Werror modbusServer.cpp -c -o modbusServer.o
 
-
 waterServer: waterServer.o guiProxy.o clientProxy.o modbusServer.o
-	g++ `curl-config --libs` -llog4cxx -lmodbus -lboost_system -lboost_thread waterServer.o guiProxy.o clientProxy.o modbusServer.o -o waterServer
+	g++ `curl-config --libs` -llog4cxx -lmodbus -lboost_system -lboost_thread guiProxy.o clientProxy.o modbusServer.o waterServer.o -o waterServer
 
 clean:
-	rm -f *.o waterServer
+	rm -f *.o *.so *.a waterServer
