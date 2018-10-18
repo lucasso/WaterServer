@@ -26,4 +26,9 @@ clean:
 	rm -f *.o *.so *.a waterServer
 	$(MAKE) -C test clean
 
-.PHONY: test
+.PHONY: test install
+
+install:
+	mkdir -p /etc/waterServer
+	cp -f config.ini log.ini /etc/waterServer/
+	cp -f waterServer /usr/bin/

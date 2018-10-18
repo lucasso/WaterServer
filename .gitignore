@@ -41,3 +41,4 @@ guiProxyTest
 Debug/*
 .cproject
 .project
+tmp/*

@@ -77,7 +77,12 @@ extern log4cxx::LoggerPtr logger;
 #define WLOG(msg) LOG4CXX_WARN(logger, msg)
 
 #define WS_ASSERT(cnd, msg) \
-	if (cnd) { std::cerr << "ASSERTION FAILED : " << msg << "\n"; ::abort(); }
+	if (!(cnd)) { \
+		std::ostringstream osek; osek << "waterServer failed: " << msg; \
+		::syslog(LOG_ERR, osek.str().c_str()); \
+		std::cerr << "ASSERTION " << osek.str() << "\n"; \
+		::abort(); \
+	}
 	
 }
 

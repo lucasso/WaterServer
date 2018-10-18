@@ -165,7 +165,7 @@ GuiProxyImpl::workerMain()
 		curl_easy_setopt(curl.get(), CURLOPT_POSTFIELDS, requestToProcess.postParams.c_str());
 		curl_easy_setopt(curl.get(), CURLOPT_WRITEFUNCTION, dataReceived);
 		curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA, &requestToProcess.responseRoot);
-		curl_easy_setopt(curl.get(), CURLOPT_VERBOSE, 1L);
+		//curl_easy_setopt(curl.get(), CURLOPT_VERBOSE, 1L);
 
 		CURLcode res = curl_easy_perform(curl.get());
 	
