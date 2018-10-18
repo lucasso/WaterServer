@@ -2,16 +2,22 @@
 
 #include <boost/thread/scoped_thread.hpp>
 #include <boost/thread/condition.hpp>
+#include <boost/property_tree/ptree.hpp>
+#include <boost/property_tree/json_parser.hpp>
 #include <boost/lexical_cast.hpp>
 #include <curl/curl.h>
 
 namespace waterServer
 {
 
+namespace pt = boost::property_tree;
+
 struct GuiRequest
 {
 	std::string path;
 	std::string postParams;
+	pt::ptree responseRoot;
+
 	GuiProxy::Callback* callback;
 };
 
@@ -96,7 +102,7 @@ GuiProxyImpl::handleRequestImpl(
 
 	{
 		boost::mutex::scoped_lock lck(this->mtx);
-		this->requests.push_back(GuiRequest{this->urlPrefix + "/" + urlRequestName, urlRequestParams, callback});
+		this->requests.push_back(GuiRequest{this->urlPrefix + "/" + urlRequestName, urlRequestParams, {}, callback});
 	}
 	this->cnd.notify_one();
 }
@@ -115,6 +121,25 @@ GuiProxyImpl::~GuiProxyImpl()
 {
 	this->worker.interrupt();
 	this->worker.join();
+}
+
+
+static size_t dataReceived(const void *ptr, size_t size, size_t nmemb, void *userp)
+{
+	try
+	{
+		size_t sizeOfAvailData = size*nmemb;
+
+		std::stringstream ss;
+		ss << std::string{static_cast<char const *>(ptr), sizeOfAvailData};
+		boost::property_tree::read_json(ss, *static_cast<pt::ptree*>(userp));
+		return sizeOfAvailData;
+	}
+	catch (pt::json_parser::json_parser_error const & parseError)
+	{
+		ELOG("could not parse response, " << parseError.what());
+		return 0;
+	}
 }
 
 
@@ -138,16 +163,46 @@ GuiProxyImpl::workerMain()
 		
 		curl_easy_setopt(curl.get(), CURLOPT_URL, requestToProcess.path.c_str());
 		curl_easy_setopt(curl.get(), CURLOPT_POSTFIELDS, requestToProcess.postParams.c_str());
- 
+		curl_easy_setopt(curl.get(), CURLOPT_WRITEFUNCTION, dataReceived);
+		curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA, &requestToProcess.responseRoot);
+		curl_easy_setopt(curl.get(), CURLOPT_VERBOSE, 1L);
+
 		CURLcode res = curl_easy_perform(curl.get());
 	
 		switch (res)
 		{
 		case CURLE_OK:
-			LOG("success");
-			requestToProcess.callback->success(13);
-			break;
+		{
+			long httpCode = 0;
+			curl_easy_getinfo (curl.get(), CURLINFO_RESPONSE_CODE, &httpCode);
 
+			if (httpCode == 200) // OK
+			{
+				try
+				{
+					int32_t const creditsAvail = requestToProcess.responseRoot.get<int32_t>("credit");
+					LOG("success, creditsAvail:" << creditsAvail);
+					requestToProcess.callback->success(creditsAvail);
+				}
+				catch (pt::ptree_bad_path const &)
+				{
+					ELOG("there is no \"credit\" field in success response, failing request");
+					requestToProcess.callback->serverInternalError();
+				}
+
+			}
+			else if (httpCode == 404) // Not found
+			{
+				LOG("not found");
+				requestToProcess.callback->notFound();
+			}
+			else
+			{
+				ELOG("internal error, httpCode:" << httpCode);
+				requestToProcess.callback->serverInternalError();
+			}
+			break;
+		}
 		default:
 			LOG("request failed, curlCode:" << res << ", error:" << curl_easy_strerror(res));
 			requestToProcess.callback->serverInternalError();

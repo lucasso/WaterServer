@@ -8,3 +8,6 @@ thread about automation: https://unix.stackexchange.com/questions/198290/package
 
 docker z raspbianem
 https://hub.docker.com/r/resin/rpi-raspbian/
+
+skomplikowany przyklad robienia requestow POST
+https://curl.haxx.se/libcurl/c/post-callback.html

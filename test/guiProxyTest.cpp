@@ -58,6 +58,10 @@ void guiProxyTest(GuiProxy & gp)
 	GuiProxyTestCallback cb;
 	gp.handleIdPinRequest(1579, 9191, 1001, &cb);
 	cb.waitForReply();
+	gp.handleRfidRequest(11111, 100, &cb);
+	cb.waitForReply();
+	gp.handleRfidRequest(9876543, 10, &cb);
+	cb.waitForReply();
 }
 
 
