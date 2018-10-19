@@ -113,7 +113,7 @@ GuiProxyImpl::GuiProxyImpl(std::string const & urlPrefixArg) :
 	urlPrefix(urlPrefixArg),
 	worker{boost::thread(&GuiProxyImpl::workerMain, this)}
 {
-	LOG("using url: " << this->urlPrefix);
+	DLOG("using url: " << this->urlPrefix);
 }
 
 

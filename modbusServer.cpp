@@ -14,18 +14,11 @@ public:
 	ModbusServerImpl(const char *device, int baud, char parity, int data_bit, int stop_bit, int timeoutSec) :
 		ctx(modbus_new_rtu(device, baud, parity, data_bit, stop_bit), modbus_free)
 	{
-		if (this->ctx.get() == nullptr)
-		{
-			ELOG("unable to create the libmodbus context, " << modbus_strerror(errno));
-			throw RestartNeededException();
-		}
+		THROW_RESTART_NEEDED_IF(this->ctx.get() == nullptr,
+			"unable to create the libmodbus context, " << modbus_strerror(errno));
 
 		auto connectResult = modbus_connect(this->ctx.get());
-		if (connectResult == -1)
-		{
-			ELOG("modbus_connect failed: " << modbus_strerror(errno));
-			throw RestartNeededException();
-		}
+		THROW_RESTART_NEEDED_IF(connectResult == -1, "modbus_connect failed: " << modbus_strerror(errno));
 
 		struct timeval timeoutValue = { timeoutSec, 0 };
 		modbus_set_response_timeout(this->ctx.get(), &timeoutValue);
@@ -50,15 +43,6 @@ public:
 		{
 			DLOG("modbus reading failed " << modbus_strerror(errno));
 		}
-//		else
-//		{
-//			std::ostringstream oss;
-//			for (int i = 0; i < nb; ++i)
-//			{
-//				oss << dest[i] << ";";
-//			}
-//			DLOG("received " << oss.str());
-//		}
 		return retVal;
 	}
 

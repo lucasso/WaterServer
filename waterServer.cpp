@@ -28,10 +28,13 @@ int applicationMain(
 )
 {
 	GuiProxy::GlobalInit();
+	bool lastStartSucceeded = true;
 
 	while (1)
 	{
-		LOG("starting application");
+		if (lastStartSucceeded) { LOG("starting application"); }
+		else { DLOG("trying to start again"); }
+
 		try
 		{
 			std::unique_ptr<GuiProxy> const guiProxy = GuiProxy::CreateDefault(guiUrl);
@@ -40,11 +43,20 @@ int applicationMain(
 			);
 			std::unique_ptr<ClientProxy> const clientProxy = ClientProxy::CreateDefault(
 				*guiProxy, *modbusServer, slaveIds);
+
+			LOG("starting application succeeded");
+			lastStartSucceeded = true;
+
 			clientProxy->run();
 		}
-		catch (RestartNeededException const &)
+		catch (RestartNeededException const & exc)
 		{
-			LOG("server failed");
+			if (lastStartSucceeded)
+			{
+					LOG("server start failed, " << exc.what() << ", trying again...");
+					lastStartSucceeded = false;
+			}
+			else { DLOG("server start failed, " << exc.what() << ", trying again..."); }
 			boost::this_thread::sleep(boost::posix_time::seconds(1));
 		}
 	}
@@ -122,6 +134,7 @@ int main(int argc, char** argv)
 	{
 		log4cxx::PropertyConfigurator::configure(argv[2]);
 		syslog(LOG_INFO, "started waterServer");
+		LOG("started waterServer process, version:" << VERSION);
 		return waterServer::applicationMain(
 			pt.get<std::string>("guiurl"),
 			waterServer::makeSlavesArray(pt.get<std::string>("slaves")),

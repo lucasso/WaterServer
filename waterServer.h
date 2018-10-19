@@ -2,19 +2,27 @@
 #define _WATER_SERVER
 #include <iostream>
 
-
 #include "waterSharedTypes.h"
 
 #include <list>
 #include <memory> // unique_ptr
 #include <log4cxx/logger.h>
 
+#define VERSION "1.0"
+
 namespace waterServer
 {
 
 using water::WaterClient;
 
-class RestartNeededException {};
+class RestartNeededException
+{
+	std::string whatStr;
+public:
+	RestartNeededException(std::string const & whatArg = "") : whatStr(whatArg) {}
+
+	std::string const & what() const  { return this->whatStr; }
+};
 
 class GuiProxy
 {
@@ -71,10 +79,10 @@ std::ostream & operator<<(std::ostream &, water::Reply const &);
 
 extern log4cxx::LoggerPtr logger;
 
-#define DLOG(msg) LOG4CXX_DEBUG(logger, msg)
-#define LOG(msg) LOG4CXX_INFO(logger, msg)
-#define ELOG(msg) LOG4CXX_ERROR(logger, msg)
-#define WLOG(msg) LOG4CXX_WARN(logger, msg)
+#define DLOG(msg) LOG4CXX_DEBUG(waterServer::logger, msg)
+#define LOG(msg) LOG4CXX_INFO(waterServer::logger, msg)
+#define ELOG(msg) LOG4CXX_ERROR(waterServer::logger, msg)
+#define WLOG(msg) LOG4CXX_WARN(waterServer::logger, msg)
 
 #define WS_ASSERT(cnd, msg) \
 	if (!(cnd)) { \
@@ -85,5 +93,11 @@ extern log4cxx::LoggerPtr logger;
 	}
 	
 }
+
+#define THROW_RESTART_NEEDED_IF(cnd, msg) \
+	if (cnd) { \
+		std::ostringstream osek; osek << msg; \
+		throw RestartNeededException(osek.str()); \
+	}
 
 #endif // _WATER_SERVER
