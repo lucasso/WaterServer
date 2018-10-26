@@ -98,7 +98,7 @@ void
 GuiProxyImpl::handleRequestImpl(
 	std::string urlRequestName, std::string urlRequestParams, WaterClient::Credit creditToConsume, GuiProxy::Callback* callback)
 {
-	if (creditToConsume > 0) urlRequestParams += "&=consumed_credit=" + boost::lexical_cast<std::string>(creditToConsume);
+	if (creditToConsume > 0) urlRequestParams += "&consumed_credit=" + boost::lexical_cast<std::string>(creditToConsume);
 
 	{
 		boost::mutex::scoped_lock lck(this->mtx);

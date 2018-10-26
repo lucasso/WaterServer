@@ -53,6 +53,10 @@ public:
 		{
 			ELOG("modbus writing failed " << modbus_strerror(errno));
 		}
+		else
+		  {
+		    DLOG("modbus writing succeeded");
+		  }
 		return retVal;
 	}
 
