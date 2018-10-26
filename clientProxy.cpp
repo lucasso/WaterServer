@@ -127,7 +127,7 @@ Slave::readRequest(ModbusServer & ms)
 	if (rq->requestSeqNumAtBegin != rq->requestSeqNumAtEnd)
 	{
 		ELOG("request ignored because seq nums do not match, start:"
-			<< rq->requestSeqNumAtBegin << ", end:" << rq->requestSeqNumAtEnd);
+			<< +rq->requestSeqNumAtBegin << ", end:" << +rq->requestSeqNumAtEnd);
 		return std::unique_ptr<WaterClient::Request>();
 	}
 

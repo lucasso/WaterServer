@@ -30,5 +30,6 @@ clean:
 
 install:
 	mkdir -p /etc/waterServer
-	cp -f config.ini log.ini /etc/waterServer/
+	cp -n config.ini /etc/waterServer/
+	cp -f log.ini /etc/waterServer/
 	cp -f waterServer /usr/bin/
